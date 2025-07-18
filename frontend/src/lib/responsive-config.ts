@@ -21,7 +21,7 @@ export const PANEL_WIDTHS = {
 // Generate classes for TaskDetailsPanel
 export const getTaskPanelClasses = () => {
   const overlayClasses = [
-    'fixed inset-y-0 right-0 z-50',
+    'fixed inset-y-0 right-0 z-50 max-h-screen overflow-y-auto',
     PANEL_WIDTHS.base,
     PANEL_WIDTHS.sm,
     PANEL_WIDTHS.md,
@@ -37,7 +37,7 @@ export const getTaskPanelClasses = () => {
     `${PANEL_SIDE_BY_SIDE_BREAKPOINT}:w-[800px]`,
   ].join(' ');
 
-  return `${overlayClasses} ${sideBySideClasses} bg-background border-l shadow-lg overflow-hidden`;
+  return `${overlayClasses} ${sideBySideClasses} bg-background border-l shadow-lg ${PANEL_SIDE_BY_SIDE_BREAKPOINT}:overflow-hidden`;
 };
 
 // Generate classes for backdrop (only show in overlay mode)

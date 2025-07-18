@@ -375,46 +375,53 @@ export function ProjectTasks() {
       <div className={getKanbanSectionClasses(isPanelOpen)}>
         {/* Header */}
 
-        <div className="px-8 my-12 flex flex-row">
-          <div className="w-full flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{project?.name || 'Project'}</h1>
-            {project?.current_branch && (
-              <span className="text-sm text-muted-foreground bg-muted px-2 py-1 rounded-md">
-                {project.current_branch}
-              </span>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleOpenInIDE}
-              className="h-8 w-8 p-0"
-              title="Open in IDE"
-            >
-              <FolderOpen className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsProjectSettingsOpen(true)}
-              className="h-8 w-8 p-0"
-              title="Project Settings"
-            >
-              <Settings className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex items-center gap-3">
-            <Input
-              type="text"
-              placeholder="Search tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-64"
-            />
-            <Button onClick={handleCreateNewTask}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Task
-            </Button>
-            <DropdownMenu>
+        <div className="px-4 md:px-8 my-8 md:my-12 space-y-4">
+          {/* Project Info Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl md:text-2xl font-bold">{project?.name || 'Project'}</h1>
+              {project?.current_branch && (
+                <span className="text-xs md:text-sm text-muted-foreground bg-muted px-2 py-1 rounded-md">
+                  {project.current_branch}
+                </span>
+              )}
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleOpenInIDE}
+                  className="h-8 w-8 p-0"
+                  title="Open in IDE"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsProjectSettingsOpen(true)}
+                  className="h-8 w-8 p-0"
+                  title="Project Settings"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            
+            {/* Actions Row - Mobile */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+              <Input
+                type="text"
+                placeholder="Search tasks..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full sm:w-48 lg:w-64"
+              />
+              <div className="flex gap-2">
+                <Button onClick={handleCreateNewTask} className="flex-1 sm:flex-initial">
+                  <Plus className="h-4 w-4 mr-2" />
+                  <span className="sm:inline">Add Task</span>
+                </Button>
+                <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
                   <LibraryBig className="h-4 w-4" />
@@ -477,6 +484,8 @@ export function ProjectTasks() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -496,8 +505,8 @@ export function ProjectTasks() {
             </Card>
           </div>
         ) : (
-          <div className="px-8 overflow-x-scroll my-4">
-            <div className="min-w-[900px] max-w-[2000px] relative py-1">
+          <div className="px-4 md:px-8 my-4">
+            <div className="w-full max-w-[2000px] mx-auto">
               <TaskKanbanBoard
                 tasks={tasks}
                 searchQuery={searchQuery}

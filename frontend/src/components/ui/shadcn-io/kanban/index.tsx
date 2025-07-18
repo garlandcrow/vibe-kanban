@@ -43,6 +43,7 @@ export const KanbanBoard = ({ id, children, className }: KanbanBoardProps) => {
     <div
       className={cn(
         'flex h-full min-h-40 flex-col gap-2 rounded-md border bg-secondary p-2 text-xs shadow-sm outline outline-2 transition-all',
+        'w-full md:min-w-[200px]',
         isOver ? 'outline-primary' : 'outline-transparent',
         className
       )}
@@ -174,7 +175,8 @@ export const KanbanProvider = ({
     >
       <div
         className={cn(
-          'grid w-full auto-cols-fr grid-flow-col gap-4',
+          'grid w-full gap-4',
+          'grid-cols-1 md:auto-cols-fr md:grid-flow-col md:grid-cols-none',
           className
         )}
       >

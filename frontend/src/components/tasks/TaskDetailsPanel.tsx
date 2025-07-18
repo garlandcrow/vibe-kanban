@@ -84,7 +84,7 @@ export function TaskDetailsPanel({
 
           {/* Panel */}
           <div className={getTaskPanelClasses()}>
-            <div className="flex flex-col h-full">
+            <div className="flex flex-col min-h-full xl:h-full">
               <TaskDetailsHeader
                 onClose={onClose}
                 onEditTask={onEditTask}
@@ -101,7 +101,7 @@ export function TaskDetailsPanel({
 
               {/* Tab Content */}
               <div
-                className={`flex-1 flex flex-col min-h-0 ${activeTab === 'logs' ? 'p-4' : 'pt-4'}`}
+                className={`flex-auto flex flex-col xl:flex-1 xl:min-h-0 xl:overflow-hidden ${activeTab === 'logs' ? 'p-4' : 'pt-4'}`}
               >
                 {activeTab === 'diffs' ? (
                   <DiffTab />

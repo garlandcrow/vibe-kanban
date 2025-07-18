@@ -85,7 +85,7 @@ function LogsTab() {
         );
 
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto overscroll-contain">
         <div className="mb-4">
           <p
             className={`text-lg font-semibold mb-2 ${isSetupFailed ? 'text-destructive' : ''}`}
@@ -117,7 +117,7 @@ function LogsTab() {
         );
 
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto overscroll-contain">
         <div className="mb-4">
           <p
             className={`text-lg font-semibold mb-2 ${isCodingAgentFailed ? 'text-destructive' : ''}`}

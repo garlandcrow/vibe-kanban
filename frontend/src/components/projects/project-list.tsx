@@ -129,14 +129,14 @@ export function ProjectList() {
 
   return (
     <div className="space-y-6 p-8">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
           <p className="text-muted-foreground">
             Manage your projects and track their progress
           </p>
         </div>
-        <Button onClick={() => setShowForm(true)}>
+        <Button onClick={() => setShowForm(true)} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           Create Project
         </Button>
