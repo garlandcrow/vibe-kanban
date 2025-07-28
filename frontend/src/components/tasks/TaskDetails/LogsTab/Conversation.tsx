@@ -8,17 +8,22 @@ import {
   useState,
 } from 'react';
 import { TaskAttemptDataContext } from '@/components/context/taskDetailsContext.ts';
+import { useTaskPlan } from '@/components/context/TaskPlanContext.ts';
 import { Loader } from '@/components/ui/loader.tsx';
 import { Button } from '@/components/ui/button';
+import { AlertTriangle } from 'lucide-react';
 import Prompt from './Prompt';
 import ConversationEntry from './ConversationEntry';
 import { ConversationEntryDisplayType } from '@/lib/types';
 
 function Conversation() {
-  const { attemptData } = useContext(TaskAttemptDataContext);
+  const { attemptData, isAttemptRunning } = useContext(TaskAttemptDataContext);
+  const { isPlanningMode, latestProcessHasNoPlan } = useTaskPlan();
   const [shouldAutoScrollLogs, setShouldAutoScrollLogs] = useState(true);
   const [conversationUpdateTrigger, setConversationUpdateTrigger] = useState(0);
   const [visibleCount, setVisibleCount] = useState(100);
+  const [visibleRunningEntriesCount, setVisibleRunningEntriesCount] =
+    useState(0);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -120,8 +125,8 @@ function Conversation() {
 
   // Paginate: show only the last visibleCount entries
   const visibleEntries = useMemo(
-    () => allEntries.slice(-visibleCount),
-    [allEntries, visibleCount]
+    () => allEntries.slice(-(visibleCount - visibleRunningEntriesCount)),
+    [allEntries, visibleCount, visibleRunningEntriesCount]
   );
 
   const renderedVisibleEntries = useMemo(
@@ -160,6 +165,8 @@ function Conversation() {
             executionProcess={runningProcess}
             onConversationUpdate={handleConversationUpdate}
             diffDeletable
+            visibleEntriesNum={visibleCount}
+            onDisplayEntriesChange={setVisibleRunningEntriesCount}
           />
         </div>
       );
@@ -169,7 +176,23 @@ function Conversation() {
     attemptData.runningProcessDetails,
     handleConversationUpdate,
     allEntries,
+    visibleCount,
   ]);
+
+  // Check if we should show the status banner - only if the most recent process failed/stopped
+  const getMostRecentProcess = () => {
+    if (followUpLogs.length > 0) {
+      // Sort by creation time or use last in array as most recent
+      return followUpLogs[followUpLogs.length - 1];
+    }
+    return mainCodingAgentLog;
+  };
+
+  const mostRecentProcess = getMostRecentProcess();
+  const showStatusBanner =
+    mostRecentProcess &&
+    (mostRecentProcess.status === 'failed' ||
+      mostRecentProcess.status === 'killed');
 
   return (
     <div
@@ -177,14 +200,12 @@ function Conversation() {
       onScroll={handleLogsScroll}
       className="h-full overflow-y-auto overscroll-contain"
     >
-      {visibleCount < allEntries.length && (
+      {visibleCount - visibleRunningEntriesCount < allEntries.length && (
         <div className="flex justify-center mb-4">
           <Button
             variant="outline"
             className="w-full"
-            onClick={() =>
-              setVisibleCount((c) => Math.min(c + 100, allEntries.length))
-            }
+            onClick={() => setVisibleCount((c) => c + 100)}
           >
             Load previous logs
           </Button>
@@ -208,6 +229,45 @@ function Conversation() {
           size={48}
           className="py-8"
         />
+      )}
+
+      {/* Status banner for failed/stopped states - shown at bottom */}
+      {showStatusBanner && mostRecentProcess && (
+        <div className="mt-4 p-4 rounded-lg border">
+          <p
+            className={`text-lg font-semibold mb-2 ${
+              mostRecentProcess.status === 'failed'
+                ? 'text-destructive'
+                : 'text-orange-600'
+            }`}
+          >
+            {mostRecentProcess.status === 'failed'
+              ? 'Coding Agent Failed'
+              : 'Coding Agent Stopped'}
+          </p>
+          <p className="text-muted-foreground">
+            {mostRecentProcess.status === 'failed'
+              ? 'The coding agent encountered an error.'
+              : 'The coding agent was stopped.'}
+          </p>
+        </div>
+      )}
+
+      {/* Warning banner for planning mode without plan */}
+      {isPlanningMode && latestProcessHasNoPlan && !isAttemptRunning && (
+        <div className="mt-4 p-4 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+            <p className="text-lg font-semibold text-orange-800 dark:text-orange-300">
+              No Plan Generated
+            </p>
+          </div>
+          <p className="text-orange-700 dark:text-orange-400">
+            The last execution attempt did not produce a plan. Task creation is
+            disabled until a plan is available. Try providing more specific
+            instructions or check the conversation for any errors.
+          </p>
+        </div>
       )}
     </div>
   );

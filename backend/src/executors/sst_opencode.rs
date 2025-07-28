@@ -1,13 +1,10 @@
 use async_trait::async_trait;
-use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::{json, Value};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    process::Command,
-};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use uuid::Uuid;
 
 use crate::{
+    command_runner::{CommandProcess, CommandRunner},
     executor::{Executor, ExecutorError, NormalizedConversation, NormalizedEntry},
     models::{execution_process::ExecutionProcess, executor_session::ExecutorSession, task::Task},
     utils::shell::get_shell_command,
@@ -236,24 +233,6 @@ impl SstOpencodeExecutor {
 }
 
 /// An executor that resumes an SST Opencode session
-pub struct SstOpencodeFollowupExecutor {
-    pub session_id: String,
-    pub prompt: String,
-    executor_type: String,
-    command_base: String,
-}
-
-impl SstOpencodeFollowupExecutor {
-    /// Create a new SstOpencodeFollowupExecutor with default settings
-    pub fn new(session_id: String, prompt: String) -> Self {
-        Self {
-            session_id,
-            prompt,
-            executor_type: "SST Opencode".to_string(),
-            command_base: "npx -y opencode-ai@latest run --print-logs".to_string(),
-        }
-    }
-}
 
 #[async_trait]
 impl Executor for SstOpencodeExecutor {
@@ -262,7 +241,7 @@ impl Executor for SstOpencodeExecutor {
         pool: &sqlx::SqlitePool,
         task_id: Uuid,
         worktree_path: &str,
-    ) -> Result<AsyncGroupChild, ExecutorError> {
+    ) -> Result<CommandProcess, ExecutorError> {
         // Get the task to fetch its description
         let task = Task::find_by_id(pool, task_id)
             .await?
@@ -289,54 +268,23 @@ Task title: {}"#,
         let (shell_cmd, shell_arg) = get_shell_command();
         let opencode_command = &self.command;
 
-        let mut command = Command::new(shell_cmd);
+        let mut command = CommandRunner::new();
         command
-            .kill_on_drop(true)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null()) // Ignore stdout for OpenCode
-            .stderr(std::process::Stdio::piped())
-            .current_dir(worktree_path)
+            .command(shell_cmd)
             .arg(shell_arg)
             .arg(opencode_command)
+            .stdin(&prompt)
+            .working_dir(worktree_path)
             .env("NODE_NO_WARNINGS", "1");
 
-        let mut child = command
-            .group_spawn() // Create new process group so we can kill entire tree
-            .map_err(|e| {
-                crate::executor::SpawnContext::from_command(&command, &self.executor_type)
-                    .with_task(task_id, Some(task.title.clone()))
-                    .with_context(format!("{} CLI execution for new task", self.executor_type))
-                    .spawn_error(e)
-            })?;
+        let proc = command.start().await.map_err(|e| {
+            crate::executor::SpawnContext::from_command(&command, &self.executor_type)
+                .with_task(task_id, Some(task.title.clone()))
+                .with_context(format!("{} CLI execution for new task", self.executor_type))
+                .spawn_error(e)
+        })?;
 
-        // Write prompt to stdin safely
-        if let Some(mut stdin) = child.inner().stdin.take() {
-            use tokio::io::AsyncWriteExt;
-            tracing::debug!(
-                "Writing prompt to OpenCode stdin for task {}: {:?}",
-                task_id,
-                prompt
-            );
-            stdin.write_all(prompt.as_bytes()).await.map_err(|e| {
-                let context =
-                    crate::executor::SpawnContext::from_command(&command, &self.executor_type)
-                        .with_task(task_id, Some(task.title.clone()))
-                        .with_context(format!(
-                            "Failed to write prompt to {} CLI stdin",
-                            self.executor_type
-                        ));
-                ExecutorError::spawn_failed(e, context)
-            })?;
-            stdin.shutdown().await.map_err(|e| {
-                let context =
-                    crate::executor::SpawnContext::from_command(&command, &self.executor_type)
-                        .with_task(task_id, Some(task.title.clone()))
-                        .with_context(format!("Failed to close {} CLI stdin", self.executor_type));
-                ExecutorError::spawn_failed(e, context)
-            })?;
-        }
-
-        Ok(child)
+        Ok(proc)
     }
 
     /// Execute with OpenCode filtering for stderr
@@ -347,15 +295,18 @@ Task title: {}"#,
         attempt_id: Uuid,
         execution_process_id: Uuid,
         worktree_path: &str,
-    ) -> Result<command_group::AsyncGroupChild, ExecutorError> {
-        let mut child = self.spawn(pool, task_id, worktree_path).await?;
+    ) -> Result<CommandProcess, ExecutorError> {
+        let mut proc = self.spawn(pool, task_id, worktree_path).await?;
 
-        // Take stderr pipe for OpenCode filtering
-        let stderr = child
-            .inner()
+        // Get stderr stream from CommandProcess for OpenCode filtering
+        let mut stream = proc
+            .stream()
+            .await
+            .expect("Failed to get streams from command process");
+        let stderr = stream
             .stderr
             .take()
-            .expect("Failed to take stderr from child process");
+            .expect("Failed to get stderr from command stream");
 
         // Start OpenCode stderr filtering task
         let pool_clone = pool.clone();
@@ -368,7 +319,7 @@ Task title: {}"#,
             worktree_path_clone,
         ));
 
-        Ok(child)
+        Ok(proc)
     }
 
     fn normalize_logs(
@@ -398,91 +349,31 @@ Task title: {}"#,
             summary: None,
         })
     }
-}
 
-#[async_trait]
-impl Executor for SstOpencodeFollowupExecutor {
-    async fn spawn(
-        &self,
-        _pool: &sqlx::SqlitePool,
-        _task_id: Uuid,
-        worktree_path: &str,
-    ) -> Result<AsyncGroupChild, ExecutorError> {
-        // Use shell command for cross-platform compatibility
-        let (shell_cmd, shell_arg) = get_shell_command();
-        let opencode_command = format!("{} --session {}", self.command_base, self.session_id);
-
-        let mut command = Command::new(shell_cmd);
-        command
-            .kill_on_drop(true)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null()) // Ignore stdout for OpenCode
-            .stderr(std::process::Stdio::piped())
-            .current_dir(worktree_path)
-            .arg(shell_arg)
-            .arg(&opencode_command)
-            .env("NODE_NO_WARNINGS", "1");
-
-        let mut child = command
-            .group_spawn() // Create new process group so we can kill entire tree
-            .map_err(|e| {
-                crate::executor::SpawnContext::from_command(&command, &self.executor_type)
-                    .with_context(format!(
-                        "{} CLI followup execution for session {}",
-                        self.executor_type, self.session_id
-                    ))
-                    .spawn_error(e)
-            })?;
-
-        // Write prompt to stdin safely
-        if let Some(mut stdin) = child.inner().stdin.take() {
-            use tokio::io::AsyncWriteExt;
-            tracing::debug!(
-                "Writing prompt to {} stdin for session {}: {:?}",
-                self.executor_type,
-                self.session_id,
-                self.prompt
-            );
-            stdin.write_all(self.prompt.as_bytes()).await.map_err(|e| {
-                let context =
-                    crate::executor::SpawnContext::from_command(&command, &self.executor_type)
-                        .with_context(format!(
-                            "Failed to write prompt to {} CLI stdin for session {}",
-                            self.executor_type, self.session_id
-                        ));
-                ExecutorError::spawn_failed(e, context)
-            })?;
-            stdin.shutdown().await.map_err(|e| {
-                let context =
-                    crate::executor::SpawnContext::from_command(&command, &self.executor_type)
-                        .with_context(format!(
-                            "Failed to close {} CLI stdin for session {}",
-                            self.executor_type, self.session_id
-                        ));
-                ExecutorError::spawn_failed(e, context)
-            })?;
-        }
-
-        Ok(child)
-    }
-
-    /// Execute with OpenCode filtering for stderr
-    async fn execute_streaming(
+    /// Execute follow-up with OpenCode filtering for stderr
+    async fn execute_followup_streaming(
         &self,
         pool: &sqlx::SqlitePool,
         task_id: Uuid,
         attempt_id: Uuid,
         execution_process_id: Uuid,
+        session_id: &str,
+        prompt: &str,
         worktree_path: &str,
-    ) -> Result<command_group::AsyncGroupChild, ExecutorError> {
-        let mut child = self.spawn(pool, task_id, worktree_path).await?;
+    ) -> Result<CommandProcess, ExecutorError> {
+        let mut proc = self
+            .spawn_followup(pool, task_id, session_id, prompt, worktree_path)
+            .await?;
 
-        // Take stderr pipe for OpenCode filtering
-        let stderr = child
-            .inner()
+        // Get stderr stream from CommandProcess for OpenCode filtering
+        let mut stream = proc
+            .stream()
+            .await
+            .expect("Failed to get streams from command process");
+        let stderr = stream
             .stderr
             .take()
-            .expect("Failed to take stderr from child process");
+            .expect("Failed to get stderr from command stream");
 
         // Start OpenCode stderr filtering task
         let pool_clone = pool.clone();
@@ -495,17 +386,40 @@ impl Executor for SstOpencodeFollowupExecutor {
             worktree_path_clone,
         ));
 
-        Ok(child)
+        Ok(proc)
     }
 
-    fn normalize_logs(
+    async fn spawn_followup(
         &self,
-        logs: &str,
+        _pool: &sqlx::SqlitePool,
+        _task_id: Uuid,
+        session_id: &str,
+        prompt: &str,
         worktree_path: &str,
-    ) -> Result<NormalizedConversation, String> {
-        // Reuse the same logic as the main SstOpencodeExecutor
-        let main_executor = SstOpencodeExecutor::new();
-        main_executor.normalize_logs(logs, worktree_path)
+    ) -> Result<CommandProcess, ExecutorError> {
+        // Use shell command for cross-platform compatibility
+        let (shell_cmd, shell_arg) = get_shell_command();
+        let opencode_command = format!("{} --session {}", self.command, session_id);
+
+        let mut command = CommandRunner::new();
+        command
+            .command(shell_cmd)
+            .arg(shell_arg)
+            .arg(&opencode_command)
+            .stdin(prompt)
+            .working_dir(worktree_path)
+            .env("NODE_NO_WARNINGS", "1");
+
+        let proc = command.start().await.map_err(|e| {
+            crate::executor::SpawnContext::from_command(&command, &self.executor_type)
+                .with_context(format!(
+                    "{} CLI followup execution for session {}",
+                    self.executor_type, session_id
+                ))
+                .spawn_error(e)
+        })?;
+
+        Ok(proc)
     }
 }
 
@@ -525,7 +439,7 @@ mod tests {
         let executor = SstOpencodeExecutor::new();
 
         // This is what the database should contain after our streaming function processes it
-        let logs = r#"{"timestamp":"2025-07-16T18:04:00Z","entry_type":{"type":"tool_use","tool_name":"Read","action_type":{"action":"file_read","path":"hello.js"}},"content":"`hello.js`","metadata":{"filePath":"/path/to/repo/hello.js"}}
+        let logs = r#"{"timestamp":"2025-07-16T18:04:00Z","entry_type":{"type":"tool_use","tool_name":"read","action_type":{"action":"file_read","path":"hello.js"}},"content":"`hello.js`","metadata":{"filePath":"/path/to/repo/hello.js"}}
 {"timestamp":"2025-07-16T18:04:01Z","entry_type":{"type":"assistant_message"},"content":"I'll read the hello.js file to see its current contents.","metadata":null}
 {"timestamp":"2025-07-16T18:04:02Z","entry_type":{"type":"tool_use","tool_name":"bash","action_type":{"action":"command_run","command":"ls -la"}},"content":"`ls -la`","metadata":{"command":"ls -la"}}
 {"timestamp":"2025-07-16T18:04:03Z","entry_type":{"type":"assistant_message"},"content":"The file exists and contains a hello world function.","metadata":null}"#;
@@ -544,7 +458,7 @@ mod tests {
             action_type,
         } = &result.entries[0].entry_type
         {
-            assert_eq!(tool_name, "Read");
+            assert_eq!(tool_name, "read");
             assert!(matches!(action_type, ActionType::FileRead { .. }));
         }
         assert_eq!(result.entries[0].content, "`hello.js`");
@@ -644,10 +558,10 @@ The file listing shows several items."#;
             "All timestamps should be unique"
         );
 
-        // Parse the first line (should be Read tool use)
+        // Parse the first line (should be read tool use - normalized to lowercase)
         let first_json: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(first_json["entry_type"]["type"], "tool_use");
-        assert_eq!(first_json["entry_type"]["tool_name"], "Read");
+        assert_eq!(first_json["entry_type"]["tool_name"], "read");
         assert_eq!(first_json["content"], "`hello.js`");
 
         // Parse the second line (should be assistant message)

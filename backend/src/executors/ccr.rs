@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use command_group::AsyncGroupChild;
 use uuid::Uuid;
 
 use crate::{
+    command_runner::CommandProcess,
     executor::{Executor, ExecutorError, NormalizedConversation},
-    executors::{ClaudeExecutor, ClaudeFollowupExecutor},
+    executors::ClaudeExecutor,
 };
 
 /// An executor that uses Claude Code Router (CCR) to process tasks
@@ -33,8 +33,21 @@ impl Executor for CCRExecutor {
         pool: &sqlx::SqlitePool,
         task_id: Uuid,
         worktree_path: &str,
-    ) -> Result<AsyncGroupChild, ExecutorError> {
+    ) -> Result<CommandProcess, ExecutorError> {
         self.0.spawn(pool, task_id, worktree_path).await
+    }
+
+    async fn spawn_followup(
+        &self,
+        pool: &sqlx::SqlitePool,
+        task_id: Uuid,
+        session_id: &str,
+        prompt: &str,
+        worktree_path: &str,
+    ) -> Result<CommandProcess, ExecutorError> {
+        self.0
+            .spawn_followup(pool, task_id, session_id, prompt, worktree_path)
+            .await
     }
 
     fn normalize_logs(
@@ -75,41 +88,4 @@ fn filter_ccr_service_messages(logs: &str) -> String {
         })
         .collect::<Vec<&str>>()
         .join("\n")
-}
-
-/// Claude Code Router followup executor - forwards to ClaudeFollowupExecutor with Claude Code Router command
-pub struct CCRFollowupExecutor(ClaudeFollowupExecutor);
-
-impl CCRFollowupExecutor {
-    pub fn new(session_id: String, prompt: String) -> Self {
-        Self(ClaudeFollowupExecutor::with_command(
-            session_id,
-            prompt,
-            "claude-code-router".to_string(),
-            "npx -y @musistudio/claude-code-router code -p --dangerously-skip-permissions --verbose --output-format=stream-json".to_string(),
-        ))
-    }
-}
-
-#[async_trait]
-impl Executor for CCRFollowupExecutor {
-    async fn spawn(
-        &self,
-        pool: &sqlx::SqlitePool,
-        task_id: Uuid,
-        worktree_path: &str,
-    ) -> Result<AsyncGroupChild, ExecutorError> {
-        self.0.spawn(pool, task_id, worktree_path).await
-    }
-
-    fn normalize_logs(
-        &self,
-        logs: &str,
-        worktree_path: &str,
-    ) -> Result<NormalizedConversation, String> {
-        let filtered_logs = filter_ccr_service_messages(logs);
-        let mut result = self.0.normalize_logs(&filtered_logs, worktree_path)?;
-        result.executor_type = "claude-code-router".to_string();
-        Ok(result)
-    }
 }

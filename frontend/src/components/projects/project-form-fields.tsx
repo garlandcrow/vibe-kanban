@@ -3,6 +3,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Folder } from 'lucide-react';
+import { useSystemInfo } from '@/hooks/use-system-info';
+import {
+  createScriptPlaceholderStrategy,
+  ScriptPlaceholderContext,
+} from '@/utils/script-placeholders';
 
 interface ProjectFormFieldsProps {
   isEditing: boolean;
@@ -21,6 +26,8 @@ interface ProjectFormFieldsProps {
   setSetupScript: (script: string) => void;
   devScript: string;
   setDevScript: (script: string) => void;
+  cleanupScript: string;
+  setCleanupScript: (script: string) => void;
   error: string;
 }
 
@@ -41,8 +48,24 @@ export function ProjectFormFields({
   setSetupScript,
   devScript,
   setDevScript,
+  cleanupScript,
+  setCleanupScript,
   error,
 }: ProjectFormFieldsProps) {
+  const { systemInfo } = useSystemInfo();
+
+  // Create strategy-based placeholders
+  const placeholders = systemInfo
+    ? new ScriptPlaceholderContext(
+        createScriptPlaceholderStrategy(systemInfo.os_type)
+      ).getPlaceholders()
+    : {
+        setup: '#!/bin/bash\nnpm install\n# Add any setup commands here...',
+        dev: '#!/bin/bash\nnpm run dev\n# Add dev server start command here...',
+        cleanup:
+          '#!/bin/bash\n# Add cleanup commands here...\n# This runs after coding agent execution',
+      };
+
   return (
     <>
       {!isEditing && (
@@ -178,7 +201,7 @@ export function ProjectFormFields({
           id="setup-script"
           value={setupScript}
           onChange={(e) => setSetupScript(e.target.value)}
-          placeholder="#!/bin/bash&#10;npm install&#10;# Add any setup commands here..."
+          placeholder={placeholders.setup}
           rows={4}
           className="w-full px-3 py-2 border border-input bg-background text-foreground rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
         />
@@ -195,7 +218,7 @@ export function ProjectFormFields({
           id="dev-script"
           value={devScript}
           onChange={(e) => setDevScript(e.target.value)}
-          placeholder="#!/bin/bash&#10;npm run dev&#10;# Add dev server start command here..."
+          placeholder={placeholders.dev}
           rows={4}
           className="w-full px-3 py-2 border border-input bg-background text-foreground rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
         />
@@ -203,6 +226,23 @@ export function ProjectFormFields({
           This script can be run from task attempts to start a development
           server. Use it to quickly start your project's dev server for testing
           changes.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="cleanup-script">Cleanup Script (Optional)</Label>
+        <textarea
+          id="cleanup-script"
+          value={cleanupScript}
+          onChange={(e) => setCleanupScript(e.target.value)}
+          placeholder={placeholders.cleanup}
+          rows={4}
+          className="w-full px-3 py-2 border border-input bg-background text-foreground rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <p className="text-sm text-muted-foreground">
+          This script will run after coding agent execution is complete. Use it
+          for quality assurance tasks like running linters, formatters, tests,
+          or other validation steps.
         </p>
       </div>
 

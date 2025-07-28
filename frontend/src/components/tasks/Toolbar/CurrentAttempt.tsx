@@ -1,4 +1,5 @@
 import {
+  Check,
   ExternalLink,
   GitBranch as GitBranchIcon,
   GitPullRequest,
@@ -62,6 +63,7 @@ import {
   TaskRelatedTasksContext,
   TaskSelectedAttemptContext,
 } from '@/components/context/taskDetailsContext.ts';
+import { useTaskPlan } from '@/components/context/TaskPlanContext.ts';
 import { useConfig } from '@/components/config-provider.tsx';
 import { useKeyboardShortcuts } from '@/lib/keyboard-shortcuts.ts';
 import { useNavigate } from 'react-router-dom';
@@ -125,6 +127,7 @@ function CurrentAttempt({
   const { executionState, fetchExecutionState } = useContext(
     TaskExecutionStateContext
   );
+  const { isPlanningMode, canCreateTask } = useTaskPlan();
 
   const [isStartingDevServer, setIsStartingDevServer] = useState(false);
   const [merging, setMerging] = useState(false);
@@ -138,6 +141,7 @@ function CurrentAttempt({
   const [selectedRebaseBranch, setSelectedRebaseBranch] = useState<string>('');
   const [showStopConfirmation, setShowStopConfirmation] = useState(false);
   const [isApprovingPlan, setIsApprovingPlan] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const processedDevServerLogs = useMemo(() => {
     if (!devServerDetails) return 'No output yet...';
@@ -171,7 +175,6 @@ function CurrentAttempt({
 
     try {
       const result = await executionProcessesApi.getDetails(
-        projectId,
         runningDevServer.id
       );
       setDevServerDetails(result);
@@ -347,7 +350,7 @@ function CurrentAttempt({
       // Refresh branch status after rebase
       fetchBranchStatus();
     } catch (err) {
-      setError('Failed to rebase branch');
+      setError(err instanceof Error ? err.message : 'Failed to rebase branch');
     } finally {
       setRebasing(false);
     }
@@ -368,7 +371,7 @@ function CurrentAttempt({
       fetchBranchStatus();
       setShowRebaseDialog(false);
     } catch (err) {
-      setError('Failed to rebase branch');
+      setError(err instanceof Error ? err.message : 'Failed to rebase branch');
     } finally {
       setRebasing(false);
     }
@@ -456,6 +459,16 @@ function CurrentAttempt({
     if (!config?.editor?.editor_type) return 'Editor';
     return getEditorDisplayName(config.editor.editor_type);
   }, [config?.editor?.editor_type]);
+
+  const handleCopyWorktreePath = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(selectedAttempt.worktree_path);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy worktree path:', err);
+    }
+  }, [selectedAttempt.worktree_path]);
 
   return (
     <div className="space-y-2">
@@ -580,21 +593,35 @@ function CurrentAttempt({
             Open in {editorDisplayName}
           </Button>
         </div>
-        <div className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded break-all">
-          {selectedAttempt.worktree_path}
+        <div
+          className={`text-xs font-mono px-2 py-1 rounded break-all cursor-pointer transition-all duration-300 flex items-center gap-2 ${
+            copied
+              ? 'bg-green-100 text-green-800 border border-green-300'
+              : 'text-muted-foreground bg-muted hover:bg-muted/80'
+          }`}
+          onClick={handleCopyWorktreePath}
+          title={copied ? 'Copied!' : 'Click to copy worktree path'}
+        >
+          {copied && <Check className="h-3 w-3 text-green-600" />}
+          <span className={copied ? 'text-green-800' : ''}>
+            {selectedAttempt.worktree_path}
+          </span>
+          {copied && (
+            <span className="text-green-700 font-medium">Copied!</span>
+          )}
         </div>
       </div>
 
       <div className="col-span-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <div
-            className={!projectHasDevScript ? 'cursor-not-allowed' : ''}
-            onMouseEnter={() => setIsHoveringDevServer(true)}
-            onMouseLeave={() => setIsHoveringDevServer(false)}
-          >
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className={!projectHasDevScript ? 'cursor-not-allowed' : ''}
+                  onMouseEnter={() => setIsHoveringDevServer(true)}
+                  onMouseLeave={() => setIsHoveringDevServer(false)}
+                >
                   <Button
                     variant={runningDevServer ? 'destructive' : 'outline'}
                     size="sm"
@@ -614,33 +641,36 @@ function CurrentAttempt({
                       </>
                     )}
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent
-                  className={runningDevServer ? 'max-w-2xl p-4' : ''}
-                  side="top"
-                  align="center"
-                  avoidCollisions={true}
-                >
-                  {!projectHasDevScript ? (
-                    <p>Configure a dev server command in project settings</p>
-                  ) : runningDevServer && devServerDetails ? (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">
-                        Dev Server Logs (Last 10 lines):
-                      </p>
-                      <pre className="text-xs bg-muted p-2 rounded max-h-64 overflow-y-auto whitespace-pre-wrap">
-                        {processedDevServerLogs}
-                      </pre>
-                    </div>
-                  ) : runningDevServer ? (
-                    <p>Stop the running dev server</p>
-                  ) : (
-                    <p>Start the dev server</p>
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent
+                className={runningDevServer ? 'max-w-2xl p-4' : ''}
+                side="top"
+                align="center"
+                avoidCollisions={true}
+              >
+                {!projectHasDevScript ? (
+                  <p>
+                    Add a dev server script in project settings to enable this
+                    feature
+                  </p>
+                ) : runningDevServer && devServerDetails ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">
+                      Dev Server Logs (Last 10 lines):
+                    </p>
+                    <pre className="text-xs bg-muted p-2 rounded max-h-64 overflow-y-auto whitespace-pre-wrap">
+                      {processedDevServerLogs}
+                    </pre>
+                  </div>
+                ) : runningDevServer ? (
+                  <p>Stop the running dev server</p>
+                ) : (
+                  <p>Start the dev server</p>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -713,7 +743,8 @@ function CurrentAttempt({
                   disabled={
                     isAttemptRunning ||
                     executionState?.execution_state === 'CodingAgentFailed' ||
-                    executionState?.execution_state === 'SetupFailed'
+                    executionState?.execution_state === 'SetupFailed' ||
+                    (isPlanningMode && !canCreateTask)
                   }
                   size="sm"
                   className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 gap-1"
